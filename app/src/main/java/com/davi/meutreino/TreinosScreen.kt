@@ -29,6 +29,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
@@ -43,9 +44,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun TreinosScreen(store: Store, padding: PaddingValues) {
@@ -184,6 +188,10 @@ private fun ExercicioCard(ex: Exercicio, onClick: () -> Unit) {
     }
 }
 
+/**
+ * Primeiro toque: só a carga (com botões de ajuste) e como foi o treino.
+ * Séries, forma de contar o peso, reps, observação, histórico e exclusão ficam em "Detalhes".
+ */
 @Composable
 private fun ExercicioDialog(
     inicial: Exercicio?,
@@ -199,69 +207,120 @@ private fun ExercicioDialog(
     }
     var tipo by remember { mutableStateOf(inicial?.tipo ?: TipoCarga.TOTAL) }
     var reps by remember { mutableStateOf("") }
+    var sensacao by remember { mutableStateOf("") }
     var nota by remember { mutableStateOf(inicial?.nota ?: "") }
+    var detalhes by remember { mutableStateOf(inicial == null) }
     var confirmarExclusao by remember { mutableStateOf(false) }
+
+    fun passo(v: Double) {
+        val atual = parseKg(kgTexto) ?: 0.0
+        val novo = (Math.round((atual + v) * 10) / 10.0).coerceAtLeast(0.0)
+        kgTexto = fmtKg(novo)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (inicial == null) "Novo exercício" else "Registrar / editar") },
+        title = { Text(if (inicial == null) "Novo exercício" else inicial.nome) },
         text = {
             Column(
                 Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                OutlinedTextField(
-                    value = nome, onValueChange = { nome = it },
-                    label = { Text("Exercício") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text("Grupo muscular", style = MaterialTheme.typography.labelMedium)
-                Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    GRUPOS.forEach { g ->
-                        FilterChip(selected = grupo == g, onClick = { grupo = g }, label = { Text(g) })
-                    }
+                if (inicial != null) {
+                    Text(
+                        "${inicial.series} · ${inicial.tipo.label}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                OutlinedTextField(
-                    value = series, onValueChange = { series = it },
-                    label = { Text("Séries x reps") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
                 OutlinedTextField(
                     value = kgTexto, onValueChange = { kgTexto = it },
                     label = { Text("Carga (kg)") }, singleLine = true,
+                    textStyle = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    TipoCarga.entries.forEach { tc ->
-                        FilterChip(selected = tipo == tc, onClick = { tipo = tc }, label = { Text(tc.label) })
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf(-5.0, -2.5, 2.5, 5.0).forEach { v ->
+                        OutlinedButton(
+                            onClick = { passo(v) },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(0.dp),
+                        ) { Text((if (v > 0) "+" else "−") + fmtKg(Math.abs(v))) }
                     }
                 }
-                OutlinedTextField(
-                    value = reps, onValueChange = { reps = it },
-                    label = { Text("Reps de hoje (ex.: 10, 10, 9)") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = nota, onValueChange = { nota = it },
-                    label = { Text("Observação") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                val hist = inicial?.historico.orEmpty()
-                if (hist.isNotEmpty()) {
-                    Text("Histórico", style = MaterialTheme.typography.labelMedium)
-                    hist.takeLast(8).reversed().forEach { r ->
-                        val repsTxt = if (r.reps.isBlank()) "" else " · ${r.reps}"
-                        Text(
-                            "${fmtData(r.data)} · ${fmtKg(r.kg)} kg$repsTxt",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                TextButton(onClick = { detalhes = !detalhes }, contentPadding = PaddingValues(0.dp)) {
+                    Text(if (detalhes) "Ocultar detalhes" else "Detalhes")
+                }
+
+                if (detalhes) {
+                    Text("Como foi? (ajuda a calcular a meta)", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        SENSACOES.forEach { (chave, rotulo) ->
+                            FilterChip(
+                                selected = sensacao == chave,
+                                onClick = { sensacao = if (sensacao == chave) "" else chave },
+                                label = { Text(rotulo) },
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = nome, onValueChange = { nome = it },
+                        label = { Text("Exercício") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text("Grupo muscular", style = MaterialTheme.typography.labelMedium)
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        GRUPOS.forEach { g ->
+                            FilterChip(selected = grupo == g, onClick = { grupo = g }, label = { Text(g) })
+                        }
+                    }
+                    OutlinedTextField(
+                        value = series, onValueChange = { series = it },
+                        label = { Text("Séries x reps") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text("Como contar o peso", style = MaterialTheme.typography.labelMedium)
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        TipoCarga.entries.forEach { tc ->
+                            FilterChip(selected = tipo == tc, onClick = { tipo = tc }, label = { Text(tc.label) })
+                        }
+                    }
+                    OutlinedTextField(
+                        value = reps, onValueChange = { reps = it },
+                        label = { Text("Reps de hoje (ex.: 10, 10, 9)") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = nota, onValueChange = { nota = it },
+                        label = { Text("Observação") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    val hist = inicial?.historico.orEmpty()
+                    if (hist.isNotEmpty()) {
+                        Text("Histórico", style = MaterialTheme.typography.labelMedium)
+                        hist.takeLast(8).reversed().forEach { r ->
+                            val extra = listOf(r.reps, SENSACOES.toMap()[r.sensacao].orEmpty())
+                                .filter { it.isNotBlank() }.joinToString(" · ")
+                            Text(
+                                "${fmtData(r.data)} · ${fmtKg(r.kg)} kg" + if (extra.isBlank()) "" else " · $extra",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                    if (onDelete != null) {
+                        TextButton(onClick = { if (confirmarExclusao) onDelete() else confirmarExclusao = true }) {
+                            Text(
+                                if (confirmarExclusao) "Confirmar exclusão" else "Excluir exercício",
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
             }
@@ -273,8 +332,12 @@ private fun ExercicioDialog(
                     val kg = parseKg(kgTexto) ?: 0.0
                     val base = inicial ?: Exercicio(novoId(), "", grupo, "", 0.0, tipo, "", emptyList())
                     val mudouCarga = inicial == null || kg != inicial.kg
-                    val novoHist = if ((mudouCarga && kg > 0) || reps.isNotBlank()) {
-                        base.historico + Registro(hoje(), kg, reps.trim())
+                    val registrar = (mudouCarga && kg > 0) || reps.isNotBlank() || sensacao.isNotBlank()
+                    val novoHist = if (registrar) {
+                        val reg = Registro(hoje(), kg, reps.trim(), sensacao)
+                        // Um registro por dia: editar de novo no mesmo dia substitui o de hoje
+                        val semHoje = base.historico.filterNot { it.data == reg.data }
+                        (semHoje + reg).takeLast(60)
                     } else base.historico
                     onSave(
                         base.copy(
@@ -290,18 +353,6 @@ private fun ExercicioDialog(
                 },
             ) { Text("Salvar") }
         },
-        dismissButton = {
-            Row {
-                if (onDelete != null) {
-                    TextButton(onClick = { if (confirmarExclusao) onDelete() else confirmarExclusao = true }) {
-                        Text(
-                            if (confirmarExclusao) "Confirmar" else "Excluir",
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
-                TextButton(onClick = onDismiss) { Text("Cancelar") }
-            }
-        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
 }

@@ -58,7 +58,7 @@ class Store(context: Context) {
                                     .put("nota", e.nota)
                                     .put("historico", JSONArray().apply {
                                         e.historico.forEach { r ->
-                                            put(JSONObject().put("d", r.data).put("kg", r.kg).put("r", r.reps))
+                                            put(JSONObject().put("d", r.data).put("kg", r.kg).put("r", r.reps).put("s", r.sensacao))
                                         }
                                     }))
                             }
@@ -91,7 +91,7 @@ class Store(context: Context) {
                                 .getOrDefault(TipoCarga.TOTAL),
                             nota = e.optString("nota", ""),
                             historico = (e.optJSONArray("historico") ?: JSONArray()).objetos().map { r ->
-                                Registro(r.optString("d"), r.optDouble("kg", 0.0), r.optString("r", ""))
+                                Registro(r.optString("d"), r.optDouble("kg", 0.0), r.optString("r", ""), r.optString("s", ""))
                             },
                         )
                     },

@@ -15,7 +15,10 @@ enum class TipoCarga(val label: String, val mult: Double) {
     CORPO("peso corporal", 0.0),
 }
 
-data class Registro(val data: String, val kg: Double, val reps: String)
+/** sensacao: "facil", "ok", "pesado" ou "" (não informado). */
+data class Registro(val data: String, val kg: Double, val reps: String, val sensacao: String = "")
+
+val SENSACOES = listOf("facil" to "Fácil", "ok" to "Ok", "pesado" to "Pesado")
 
 data class Exercicio(
     val id: String,
@@ -103,6 +106,75 @@ fun AppData.proximoTreino(): Int {
     return 0
 }
 
+/** Próxima sessão: índice do treino e em quantos dias (0 = hoje). */
+fun AppData.proximaSessao(): Pair<Int, Int> {
+    val inicio = runCatching { LocalDate.parse(cicloInicio) }.getOrDefault(LocalDate.now())
+    val dias = ChronoUnit.DAYS.between(inicio, LocalDate.now())
+    val hojeIso = hoje()
+    for (i in 0..8) {
+        val pos = Math.floorMod(dias + i, 8L).toInt()
+        val c = CICLO[pos]
+        if (c < 0) continue
+        // Se o treino de hoje já foi registrado, a próxima sessão é a seguinte
+        val jaFeito = i == 0 && treinos.getOrNull(c)?.exercicios
+            ?.any { e -> e.historico.any { it.data == hojeIso } } == true
+        if (!jaFeito) return c to i
+    }
+    return 0 to 0
+}
+
+// ---------- Metas (progressão dupla) ----------
+
+data class Meta(val kg: Double, val motivo: String, val sobe: Boolean)
+
+/** Faixa de reps a partir de "3x8–10" (8 a 10) ou "2x15" (15 a 15). */
+fun faixaReps(series: String): Pair<Int, Int>? {
+    val m = Regex("x\\s*(\\d+)(?:\\s*[–-]\\s*(\\d+))?").find(series) ?: return null
+    val min = m.groupValues[1].toIntOrNull() ?: return null
+    val max = m.groupValues[2].toIntOrNull() ?: min
+    return min to max
+}
+
+fun repsFeitas(s: String): List<Int> = Regex("\\d+").findAll(s).mapNotNull { it.value.toIntOrNull() }.toList()
+
+private val INFERIORES = setOf("Quadríceps", "Posterior", "Glúteos", "Panturrilha")
+
+private fun arred2_5(x: Double) = Math.round(x / 2.5) * 2.5
+
+/** Quanto subir quando a meta é aumentar a carga. */
+fun Exercicio.incremento(): Double = when (tipo) {
+    TipoCarga.POR_LADO -> 2.5
+    TipoCarga.CADA_HALTER -> if (kg < 10) 1.0 else 2.0
+    TipoCarga.TOTAL -> if (grupo in INFERIORES) 5.0 else maxOf(2.5, arred2_5(kg * 0.05))
+    TipoCarga.CORPO -> 0.0
+}
+
+/**
+ * Regra: bateu o topo da faixa em todas as séries ou achou fácil -> sobe a carga;
+ * achou pesado ou ficou abaixo do mínimo -> mantém; senão mantém buscando mais reps.
+ */
+fun Exercicio.meta(): Meta {
+    val faixa = faixaReps(series)
+    val ultimo = historico.lastOrNull()
+    val reps = repsFeitas(ultimo?.reps.orEmpty())
+    val bateuTopo = faixa != null && reps.isNotEmpty() && reps.all { it >= faixa.second }
+    val abaixoMin = faixa != null && reps.isNotEmpty() && reps.any { it < faixa.first }
+    val sens = ultimo?.sensacao.orEmpty()
+    val topoTxt = faixa?.let { "${it.second} reps" } ?: "mais reps"
+
+    if (tipo == TipoCarga.CORPO) {
+        return if (bateuTopo || sens == "facil") Meta(0.0, "Segure uma anilha de 5 kg", true)
+        else Meta(0.0, "Peso corporal, buscar $topoTxt", false)
+    }
+    if (kg <= 0.0) return Meta(0.0, "Defina a carga neste treino", false)
+    return when {
+        sens == "pesado" || abaixoMin -> Meta(kg, "Mesma carga: o último foi pesado", false)
+        bateuTopo -> Meta(kg + incremento(), "Bateu o topo da faixa", true)
+        sens == "facil" -> Meta(kg + incremento(), "O último foi fácil", true)
+        else -> Meta(kg, "Mesma carga, buscar $topoTxt", false)
+    }
+}
+
 /** Ajusta o ciclo para que o treino [indice] caia hoje. */
 fun AppData.definirHojeComo(indice: Int): AppData {
     val dia = DIA_DO_TREINO.getOrElse(indice) { 0 }
@@ -165,16 +237,23 @@ object Padrao {
         val lb = "2026-11-18"
         val ub = "2026-11-19"
 
+        // Lower A: 14/11 e 22/11
+        fun h(kg1: Double, kg2: Double, s2: String = "") =
+            listOf(Registro(la, kg1, ""), Registro("2026-11-22", kg2, "", s2))
         val lowerA = Treino(
             novoId(), "Lower A", listOf(
-                ex("Agachamento livre ou hack", "Quadríceps", "3x6–8", 10.0, TipoCarga.POR_LADO, la, "5 e 7 kg/lado = aquecimento"),
-                ex("Leg press", "Quadríceps", "3x10–12", 40.0, TipoCarga.TOTAL, la),
-                ex("Stiff", "Posterior", "3x8–10", 20.0, TipoCarga.TOTAL, la),
-                ex("Cadeira extensora", "Quadríceps", "3x12–15", 20.0, TipoCarga.TOTAL, la),
-                ex("Cadeira flexora", "Posterior", "3x12", 40.0, TipoCarga.TOTAL, la),
-                ex("Panturrilha em pé", "Panturrilha", "3x12–15", 40.0, TipoCarga.TOTAL, la),
-                ex("Abdominal no banco declinado", "Abdômen", "3x12–15", 0.0, TipoCarga.CORPO, la, "10 reps por série em 14/11"),
-                ex("Elevação de pernas", "Abdômen", "3x10–12", 0.0, TipoCarga.CORPO, la, "8 e 6 reps em 14/11"),
+                ex("Agachamento livre ou hack", "Quadríceps", "3x6–8", 10.0, TipoCarga.POR_LADO, la, "5 e 7 kg/lado = aquecimento")
+                    .copy(historico = h(10.0, 10.0, "facil")),
+                ex("Leg press", "Quadríceps", "3x10–12", 50.0, TipoCarga.TOTAL, la).copy(historico = h(40.0, 50.0, "facil")),
+                ex("Stiff", "Posterior", "3x8–10", 25.0, TipoCarga.TOTAL, la).copy(historico = h(20.0, 25.0, "facil")),
+                ex("Cadeira extensora", "Quadríceps", "3x12–15", 45.0, TipoCarga.TOTAL, la, "Confira a execução: subiu de 20 para 45")
+                    .copy(historico = h(20.0, 45.0)),
+                ex("Cadeira flexora", "Posterior", "3x12", 54.0, TipoCarga.TOTAL, la).copy(historico = h(40.0, 54.0)),
+                ex("Panturrilha em pé", "Panturrilha", "3x12–15", 30.0, TipoCarga.POR_LADO, la).copy(historico = h(20.0, 30.0)),
+                ex("Abdominal no banco declinado", "Abdômen", "3x12–15", 0.0, TipoCarga.CORPO, la)
+                    .copy(historico = listOf(Registro("2026-11-22", 0.0, "", "facil"))),
+                ex("Elevação de pernas", "Abdômen", "3x10–12", 0.0, TipoCarga.CORPO, la)
+                    .copy(historico = listOf(Registro("2026-11-22", 0.0, "8"))),
             )
         )
         val upperA = Treino(

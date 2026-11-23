@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -76,12 +77,18 @@ fun App(store: Store) {
                 NavigationBarItem(
                     selected = aba == 1,
                     onClick = { aba = 1 },
-                    icon = { Icon(Icons.Filled.Person, contentDescription = null) },
-                    label = { Text("Corpo") },
+                    icon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
+                    label = { Text("Próximo") },
                 )
                 NavigationBarItem(
                     selected = aba == 2,
                     onClick = { aba = 2 },
+                    icon = { Icon(Icons.Filled.Person, contentDescription = null) },
+                    label = { Text("Corpo") },
+                )
+                NavigationBarItem(
+                    selected = aba == 3,
+                    onClick = { aba = 3 },
                     icon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
                     label = { Text("Dieta") },
                 )
@@ -90,7 +97,8 @@ fun App(store: Store) {
     ) { padding ->
         when (aba) {
             0 -> TreinosScreen(store, padding)
-            1 -> CorpoScreen(store, padding)
+            1 -> ProximoScreen(store, padding)
+            2 -> CorpoScreen(store, padding)
             else -> DietaScreen(store, padding)
         }
     }
