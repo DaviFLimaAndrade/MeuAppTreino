@@ -33,6 +33,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +52,7 @@ fun DietaScreen(store: Store, padding: PaddingValues) {
     val total = data.dieta.size
     val feitos = data.dieta.count { it.feito }
     var adicionando by remember { mutableStateOf(false) }
+    var trocando by remember { mutableStateOf<ItemDieta?>(null) }
     var editarLista by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize().padding(padding)) {
@@ -117,7 +120,13 @@ fun DietaScreen(store: Store, padding: PaddingValues) {
                         ItemRow(
                             item = item,
                             editar = editarLista,
-                            onToggle = { store.update { it.alternarItem(item.id) } },
+                            temTroca = trocasPara(item.refeicao, item.nome).isNotEmpty(),
+                            onToggle = {
+                                // Desmarcar um item trocado também desfaz a troca
+                                if (item.trocadoPor.isNotBlank()) store.update { it.trocarItem(item.id, "") }
+                                else store.update { it.alternarItem(item.id) }
+                            },
+                            onTrocar = { trocando = item },
                             onDelete = { store.update { d -> d.copy(dieta = d.dieta.filterNot { it.id == item.id }) } },
                         )
                     }
@@ -126,7 +135,7 @@ fun DietaScreen(store: Store, padding: PaddingValues) {
 
             item {
                 TextButton(
-                    onClick = { store.update { it.copy(dieta = it.dieta.map { i -> i.copy(feito = false) }) } },
+                    onClick = { store.update { it.copy(dieta = it.dieta.map { i -> i.copy(feito = false, trocadoPor = "") }) } },
                     modifier = Modifier.padding(top = 8.dp),
                 ) { Text("Desmarcar tudo") }
             }
@@ -138,6 +147,13 @@ fun DietaScreen(store: Store, padding: PaddingValues) {
         ) { Icon(Icons.Filled.Add, contentDescription = "Adicionar alimento") }
     }
 
+    trocando?.let { item ->
+        TrocaDialog(
+            item = item,
+            onDismiss = { trocando = null },
+            onEscolher = { sub -> store.update { it.trocarItem(item.id, sub) }; trocando = null },
+        )
+    }
     if (adicionando) {
         NovoItemDialog(
             onDismiss = { adicionando = false },
@@ -150,25 +166,75 @@ fun DietaScreen(store: Store, padding: PaddingValues) {
 }
 
 @Composable
-private fun ItemRow(item: ItemDieta, editar: Boolean, onToggle: () -> Unit, onDelete: () -> Unit) {
+private fun ItemRow(
+    item: ItemDieta,
+    editar: Boolean,
+    temTroca: Boolean,
+    onToggle: () -> Unit,
+    onTrocar: () -> Unit,
+    onDelete: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onToggle),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Checkbox(checked = item.feito, onCheckedChange = { onToggle() })
-        Text(
-            item.nome,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyLarge,
-            textDecoration = if (item.feito) TextDecoration.LineThrough else null,
-            color = if (item.feito) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                item.nome,
+                style = MaterialTheme.typography.bodyLarge,
+                textDecoration = if (item.feito) TextDecoration.LineThrough else null,
+                color = if (item.feito) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+            )
+            if (item.trocadoPor.isNotBlank()) {
+                Text(
+                    "Trocado por: ${item.trocadoPor}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
         if (editar) {
             IconButton(onClick = onDelete) {
                 Icon(Icons.Filled.Close, contentDescription = "Remover", tint = MaterialTheme.colorScheme.error)
             }
+        } else if (temTroca) {
+            TextButton(onClick = onTrocar) { Text("Trocar") }
         }
     }
+}
+
+@Composable
+private fun TrocaDialog(item: ItemDieta, onDismiss: () -> Unit, onEscolher: (String) -> Unit) {
+    val opcoes = trocasPara(item.refeicao, item.nome)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Trocar ${item.nome}") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "Equivalentes do seu plano. Escolha o que você comeu no lugar:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                opcoes.forEach { op ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onEscolher(op) }.padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = item.trocadoPor == op, onClick = { onEscolher(op) })
+                        Text(op, style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
+        dismissButton = {
+            if (item.trocadoPor.isNotBlank()) {
+                TextButton(onClick = { onEscolher("") }) { Text("Desfazer troca") }
+            }
+        },
+    )
 }
 
 @Composable

@@ -71,7 +71,8 @@ class Store(context: Context) {
                         .put("id", i.id)
                         .put("refeicao", i.refeicao)
                         .put("nome", i.nome)
-                        .put("feito", i.feito))
+                        .put("feito", i.feito)
+                        .put("t", i.trocadoPor))
                 }
             })
 
@@ -103,6 +104,7 @@ class Store(context: Context) {
                     refeicao = i.optString("refeicao", REFEICOES[0]),
                     nome = i.optString("nome"),
                     feito = i.optBoolean("feito", false),
+                    trocadoPor = i.optString("t", ""),
                 )
             }
             return AppData(

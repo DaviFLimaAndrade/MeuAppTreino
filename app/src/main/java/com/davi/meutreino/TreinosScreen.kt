@@ -249,21 +249,21 @@ private fun ExercicioDialog(
                         ) { Text((if (v > 0) "+" else "−") + fmtKg(Math.abs(v))) }
                     }
                 }
+                Text("Como foi?", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SENSACOES.forEach { (chave, rotulo) ->
+                        FilterChip(
+                            selected = sensacao == chave,
+                            onClick = { sensacao = if (sensacao == chave) "" else chave },
+                            label = { Text(rotulo) },
+                        )
+                    }
+                }
                 TextButton(onClick = { detalhes = !detalhes }, contentPadding = PaddingValues(0.dp)) {
                     Text(if (detalhes) "Ocultar detalhes" else "Detalhes")
                 }
 
                 if (detalhes) {
-                    Text("Como foi? (ajuda a calcular a meta)", style = MaterialTheme.typography.labelMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        SENSACOES.forEach { (chave, rotulo) ->
-                            FilterChip(
-                                selected = sensacao == chave,
-                                onClick = { sensacao = if (sensacao == chave) "" else chave },
-                                label = { Text(rotulo) },
-                            )
-                        }
-                    }
                     OutlinedTextField(
                         value = nome, onValueChange = { nome = it },
                         label = { Text("Exercício") }, singleLine = true,

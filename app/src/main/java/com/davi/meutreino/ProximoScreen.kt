@@ -1,5 +1,6 @@
 package com.davi.meutreino
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -17,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -24,6 +26,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
@@ -33,6 +36,7 @@ import java.util.Locale
 @Composable
 fun ProximoScreen(store: Store, padding: PaddingValues) {
     val data = store.data
+    val context = LocalContext.current
     val (idxProx, emDias) = data.proximaSessao()
     var sel by rememberSaveable { mutableIntStateOf(idxProx) }
     val idx = sel.coerceIn(0, (data.treinos.size - 1).coerceAtLeast(0))
@@ -68,9 +72,20 @@ fun ProximoScreen(store: Store, padding: PaddingValues) {
                         )
                         if (idx == idxProx) Text(quando.replaceFirstChar { it.uppercase() })
                         Text(
-                            "Metas a partir do último registro. Sobe quando você bate o topo da faixa ou marca \"Fácil\".",
+                            "A meta usa a carga, as reps e como foi o último treino (fácil, médio ou pesado) " +
+                                "para estimar sua força e calcular o peso da próxima sessão.",
                             style = MaterialTheme.typography.bodySmall,
                         )
+                        TextButton(
+                            onClick = {
+                                val envio = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, data.textoExportacao())
+                                }
+                                context.startActivity(Intent.createChooser(envio, "Exportar cargas"))
+                            },
+                            contentPadding = PaddingValues(0.dp),
+                        ) { Text("Exportar cargas") }
                     }
                 }
             }

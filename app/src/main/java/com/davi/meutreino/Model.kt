@@ -18,7 +18,7 @@ enum class TipoCarga(val label: String, val mult: Double) {
 /** sensacao: "facil", "ok", "pesado" ou "" (não informado). */
 data class Registro(val data: String, val kg: Double, val reps: String, val sensacao: String = "")
 
-val SENSACOES = listOf("facil" to "Fácil", "ok" to "Ok", "pesado" to "Pesado")
+val SENSACOES = listOf("facil" to "Fácil", "ok" to "Médio", "pesado" to "Pesado")
 
 data class Exercicio(
     val id: String,
@@ -36,7 +36,14 @@ data class Exercicio(
 
 data class Treino(val id: String, val nome: String, val exercicios: List<Exercicio>)
 
-data class ItemDieta(val id: String, val refeicao: String, val nome: String, val feito: Boolean)
+/** trocadoPor: substituto escolhido hoje (vazio = comeu o item original). */
+data class ItemDieta(
+    val id: String,
+    val refeicao: String,
+    val nome: String,
+    val feito: Boolean,
+    val trocadoPor: String = "",
+)
 
 data class AppData(
     val treinos: List<Treino>,
@@ -123,7 +130,11 @@ fun AppData.proximaSessao(): Pair<Int, Int> {
     return 0 to 0
 }
 
-// ---------- Metas (progressão dupla) ----------
+// ---------- Metas ----------
+// Conta usada por profissionais: estima a força máxima (1RM) pela fórmula de Epley,
+// considerando as reps feitas + as reps que sobraram (RIR, pela sensação), e
+// prescreve a carga para o mínimo da faixa de reps deixando 2 reps sobrando.
+// Limite de ±10% por sessão e arredondado para o salto de peso do equipamento.
 
 data class Meta(val kg: Double, val motivo: String, val sobe: Boolean)
 
@@ -139,39 +150,85 @@ fun repsFeitas(s: String): List<Int> = Regex("\\d+").findAll(s).mapNotNull { it.
 
 private val INFERIORES = setOf("Quadríceps", "Posterior", "Glúteos", "Panturrilha")
 
-private fun arred2_5(x: Double) = Math.round(x / 2.5) * 2.5
-
-/** Quanto subir quando a meta é aumentar a carga. */
-fun Exercicio.incremento(): Double = when (tipo) {
+/** Menor salto de peso do equipamento. */
+fun Exercicio.passo(): Double = when (tipo) {
     TipoCarga.POR_LADO -> 2.5
     TipoCarga.CADA_HALTER -> if (kg < 10) 1.0 else 2.0
-    TipoCarga.TOTAL -> if (grupo in INFERIORES) 5.0 else maxOf(2.5, arred2_5(kg * 0.05))
+    TipoCarga.TOTAL -> if (grupo in INFERIORES) 5.0 else 2.5
     TipoCarga.CORPO -> 0.0
 }
 
-/**
- * Regra: bateu o topo da faixa em todas as séries ou achou fácil -> sobe a carga;
- * achou pesado ou ficou abaixo do mínimo -> mantém; senão mantém buscando mais reps.
- */
+/** Reps em reserva estimadas pela sensação. */
+private fun rir(sensacao: String) = when (sensacao) {
+    "facil" -> 4.0
+    "pesado" -> 0.5
+    else -> 2.0
+}
+
 fun Exercicio.meta(): Meta {
-    val faixa = faixaReps(series)
+    val (min, max) = faixaReps(series) ?: (8 to 12)
     val ultimo = historico.lastOrNull()
-    val reps = repsFeitas(ultimo?.reps.orEmpty())
-    val bateuTopo = faixa != null && reps.isNotEmpty() && reps.all { it >= faixa.second }
-    val abaixoMin = faixa != null && reps.isNotEmpty() && reps.any { it < faixa.first }
     val sens = ultimo?.sensacao.orEmpty()
-    val topoTxt = faixa?.let { "${it.second} reps" } ?: "mais reps"
+    val digitadas = repsFeitas(ultimo?.reps.orEmpty())
+    val bateuTopo = digitadas.isNotEmpty() && digitadas.all { it >= max }
+    val abaixo = digitadas.isNotEmpty() && digitadas.any { it < min }
+    val semInfo = sens.isBlank() && digitadas.isEmpty()
 
     if (tipo == TipoCarga.CORPO) {
-        return if (bateuTopo || sens == "facil") Meta(0.0, "Segure uma anilha de 5 kg", true)
-        else Meta(0.0, "Peso corporal, buscar $topoTxt", false)
+        return if (bateuTopo || sens == "facil") Meta(0.0, "Foi fácil: segure uma anilha de 5 kg", true)
+        else Meta(0.0, "Peso corporal, buscar $max reps", false)
     }
     if (kg <= 0.0) return Meta(0.0, "Defina a carga neste treino", false)
-    return when {
-        sens == "pesado" || abaixoMin -> Meta(kg, "Mesma carga: o último foi pesado", false)
-        bateuTopo -> Meta(kg + incremento(), "Bateu o topo da faixa", true)
-        sens == "facil" -> Meta(kg + incremento(), "O último foi fácil", true)
-        else -> Meta(kg, "Mesma carga, buscar $topoTxt", false)
+
+    // Sem reps digitadas, estima pelas sensações: fácil = topo, médio = meio, pesado = mínimo
+    val reps = digitadas.minOrNull()?.toDouble() ?: when (sens) {
+        "facil" -> max.toDouble()
+        "pesado" -> min.toDouble()
+        else -> (min + max) / 2.0
+    }
+    val e1rm = kg * (1 + (reps + rir(sens)) / 30.0)
+    val alvo = (e1rm / (1 + (min + 2.0) / 30.0)).coerceIn(kg * 0.9, kg * 1.1)
+    val p = passo()
+    val diff = alvo - kg
+    val novo = when {
+        sens == "pesado" && !abaixo -> kg
+        diff > 0 && (sens == "facil" || bateuTopo) -> kg + p * maxOf(1.0, Math.round(diff / p).toDouble())
+        diff >= p * 0.75 -> kg + p * Math.round(diff / p)
+        diff <= -p * 0.75 -> (kg - p * maxOf(1.0, Math.round(-diff / p).toDouble())).coerceAtLeast(p)
+        else -> kg
+    }
+    val motivo = when {
+        novo > kg && bateuTopo -> "Sobe: bateu o topo da faixa"
+        novo > kg && sens == "facil" -> "Sobe: o último foi fácil"
+        novo > kg -> "Sobe: sobrou força no último"
+        novo < kg -> "Baixa: ficou abaixo de $min reps"
+        sens == "pesado" -> "Mesma carga: o último foi pesado"
+        semInfo -> "Mesma carga. Marque como foi para a meta ficar precisa"
+        else -> "Mesma carga, buscar $max reps"
+    }
+    return Meta(novo, motivo, novo > kg)
+}
+
+/** Texto com as cargas atuais de cada treino, para exportar. */
+fun AppData.textoExportacao(): String = buildString {
+    append("Meu Treino: cargas em ").append(fmtData(hoje())).append("\n")
+    treinos.forEach { t ->
+        append("\n").append(t.nome).append("\n")
+        t.exercicios.forEach { e ->
+            val u = e.historico.lastOrNull()
+            append("- ").append(e.nome).append(" (").append(e.series).append("): ")
+            if (e.tipo == TipoCarga.CORPO) append("peso corporal")
+            else if (e.kg > 0) append(fmtKg(e.kg)).append(" kg ").append(e.tipo.label)
+            else append("sem carga")
+            if (u != null) {
+                append(" · último ").append(fmtData(u.data))
+                if (u.reps.isNotBlank()) append(", reps ").append(u.reps)
+                SENSACOES.toMap()[u.sensacao]?.let { append(", ").append(it.lowercase()) }
+            }
+            val m = e.meta()
+            if (m.sobe && e.tipo != TipoCarga.CORPO) append(" → meta ").append(fmtKg(m.kg)).append(" kg")
+            append("\n")
+        }
     }
 }
 
@@ -204,7 +261,49 @@ fun AppData.alternarItem(id: String): AppData =
     copy(dieta = dieta.map { if (it.id == id) it.copy(feito = !it.feito) else it })
 
 fun AppData.novoDia(data: String): AppData =
-    copy(dieta = dieta.map { it.copy(feito = false) }, aguaMl = 0, dietaData = data)
+    copy(dieta = dieta.map { it.copy(feito = false, trocadoPor = "") }, aguaMl = 0, dietaData = data)
+
+fun AppData.trocarItem(id: String, substituto: String): AppData =
+    copy(dieta = dieta.map { if (it.id == id) it.copy(feito = substituto.isNotBlank(), trocadoPor = substituto) else it })
+
+// ---------- Substituições do plano alimentar (Yasmin, 06/11/2026) ----------
+
+private val TROCA_FRANGO = listOf(
+    "Carne vermelha magra (120 g)",
+    "Peixe branco (160 g)",
+    "Carne suína magra (120 g)",
+)
+private val TROCA_ARROZ = listOf(
+    "Macarrão cozido (300 g)",
+    "Batata inglesa cozida (750 g)",
+    "Batata inglesa assada (430 g)",
+    "Batata-doce cozida (360 g)",
+    "Batata-doce assada (270 g)",
+    "Abóbora japonesa cozida (750 g)",
+    "Mandioca cozida (300 g)",
+    "Mandioca assada (210 g)",
+)
+
+/** Opções de troca equivalentes para um item, conforme a refeição. */
+fun trocasPara(refeicao: String, nome: String): List<String> {
+    val n = nome.lowercase()
+    val cafe = refeicao == REFEICOES[0]
+    val almoco = refeicao == REFEICOES[1]
+    val jantar = refeicao == REFEICOES[3]
+    return when {
+        cafe && n.startsWith("pão francês") -> listOf("Pão de forma (2 fatias, 50 g)", "Aveia (40 g)", "Tapioca (60 g)")
+        cafe && n.startsWith("banana") -> listOf("Mamão (250 g)", "Abacaxi (200 g)", "Melancia (380 g)")
+        almoco && n.startsWith("frango") -> TROCA_FRANGO
+        jantar && n.startsWith("frango") -> TROCA_FRANGO + "3 ovos (148 g)"
+        almoco && n.startsWith("arroz") -> TROCA_ARROZ
+        jantar && n.startsWith("arroz") -> TROCA_ARROZ + listOf(
+            "Pão francês (2 unid., 100 g)", "Rap10 (3 unid., 120 g)",
+            "Pão de forma (6 fatias, 150 g)", "Pão de hambúrguer (2 unid., 140 g)",
+        )
+        almoco && n.startsWith("feijão") -> listOf("Lentilha cozida (135 g)", "Grão-de-bico cozido (120 g)")
+        else -> emptyList()
+    }
+}
 
 // ---------- Dados iniciais (cargas de nov/2026) ----------
 
